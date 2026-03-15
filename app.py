@@ -91,10 +91,10 @@ def fetch_market_data(days_back=30):
     start = end - timedelta(days=days_back)
 
     tickers = {
-        'oil_close':  'CL=F',
+        'oil_close':  'BZ=F',      # Brent crude — more reliable than CL=F
         'vix_close':  '^VIX',
         'ovx_close':  '^OVX',
-        'dxy_close':  'DX-Y.NYB',
+        'dxy_close':  'UUP',       # Dollar ETF — proxy for DXY, more reliable
         'gold_close': 'GC=F',
     }
 
@@ -102,19 +102,22 @@ def fetch_market_data(days_back=30):
     for col, ticker in tickers.items():
         try:
             df = yf.download(ticker, start=start, end=end,
-                             progress=False, auto_adjust=True)
+                             progress=False, auto_adjust=True,
+                             timeout=10)
             if len(df) > 0:
-                data[col] = df['Close'].squeeze()
-        except Exception:
-            pass
+                series = df['Close'].squeeze()
+                series = series[series > 0]  # drop zero/bad values
+                if len(series) > 0:
+                    data[col] = series
+        except Exception as e:
+            st.warning(f"Could not fetch {ticker}: {e}")
 
     if not data:
         return pd.DataFrame()
 
-    market = pd.DataFrame(data)
+    market = pd.DataFrame(data).ffill().bfill()  # forward fill gaps
     market.index = pd.to_datetime(market.index)
 
-    # Compute derived features
     if 'oil_close' in market.columns:
         log_ret = np.log(market['oil_close'] / market['oil_close'].shift(1))
         market['oil_vol_5d'] = log_ret.rolling(5).std() * np.sqrt(252)
